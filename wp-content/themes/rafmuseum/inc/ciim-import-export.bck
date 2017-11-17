@@ -1,0 +1,892 @@
+<?php
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
+class RafImportExport
+{
+
+	public function addInterviewPost($detail_json){
+		$search = new ElasticSearch();
+		$acf_fields = $meta_fields = array();
+		$info = $detail_json->_source;
+		// title
+		if(isset($info->title)){
+			$name = $info->title[0];
+			$title = $name->value;
+		} else {
+			$title = $info->summary_title;
+		}   
+		// content
+		$content = '';
+
+		//pr($info); die();
+
+		// admin id
+		//$acf_fields['field_5953a917cb588'] = $info->admin->id;
+		$meta_fields['admin_id'] = $info->admin->id;
+		// admin uid
+		//$acf_fields['field_5955187884297'] = $info->admin->uid;
+		if(isset($info->admin->uid)){
+			$meta_fields['admin_uid'] = $info->admin->uid;
+		} else {
+			$meta_fields['admin_uid'] = '';
+		}
+		if(isset($info->admin->uuid)){
+			$meta_fields['admin_uuid'] = $info->admin->uuid;
+		} else {
+			$meta_fields['admin_uuid'] = '';
+		}
+		
+		//date
+		if(isset($info->lifecycle)){
+			$acf_fields['field_5953a977cb589'] = $this->getValueIfExists($info->lifecycle, 'creation', 0, 'date', 'value');
+		} 
+		// agents
+		$agents = array();
+		if(isset($info->agents) && count($info->agents)){
+			foreach($info->agents as $a){
+				$agent = array(
+					'iagent_role' => $this->getValueIfExists($a, '@link', 'role', 0, 'value'),
+					'iagent_name' => $this->getValueIfExists($a, 'name', 0, 'value'),
+				);
+				$agents[] = $agent;
+			}
+		}
+		$acf_fields['field_5953aa11cb58b'] = $agents;
+
+
+		// stories
+		// get stories for interview
+		$stories_json = $search->getIterviewStories($info->admin->id);
+		//pr($stories_json); pr($detail_json); die(); 
+		$stories = array();
+		if(isset($stories_json->hits)){
+			foreach($stories_json->hits->hits as $xx => $hit){
+				list($story_title, $story_acf_fields, $story_meta_fields, $story_content) = $this->addStory($hit, $xx);
+				// change to names
+				$story_acf_fields['story_title'] = $story_acf_fields['field_595609d6cde50']; unset($story_acf_fields['field_595609d6cde50']);
+				//$story_acf_fields['admin.id'] = $story_acf_fields['field_595394ed2dda7']; unset($story_acf_fields['field_595394ed2dda7']);
+				//$story_acf_fields['admin.uid'] = $story_acf_fields['field_5954cc1fc25f6']; unset($story_acf_fields['field_5954cc1fc25f6']);
+				//$story_acf_fields['admin.modified'] = $story_acf_fields['field_5953955c2dda8']; unset($story_acf_fields['field_5953955c2dda8']);
+				//$story_acf_fields['admin.created'] = $story_acf_fields['field_5953959b2dda9']; unset($story_acf_fields['field_5953959b2dda9']);
+
+
+				$story_acf_fields['main_description'] = $story_acf_fields['field_59539687f0ec4']; unset($story_acf_fields['field_59539687f0ec4']);
+				$story_acf_fields['text_transcription'] = $story_acf_fields['field_595399883e326']; unset($story_acf_fields['field_595399883e326']);
+				$story_acf_fields['timecoded_transcription'] = $story_acf_fields['field_595399b63e327']; unset($story_acf_fields['field_595399b63e327']);
+				$story_acf_fields['events'] = $story_acf_fields['field_595399f03e328']; unset($story_acf_fields['field_595399f03e328']);
+
+				$stories[] = $story_acf_fields;
+				$meta_fields = array_merge($meta_fields, $story_meta_fields);
+
+			}
+		}
+
+		$acf_fields['field_5953a256c5243'] = $stories;
+
+		//pr($title); pr($acf_fields); pr($content); pr($meta_fields); die(); 
+
+		$post_id = $this->addPost($title, $acf_fields, $meta_fields,  $content, 'interview', 'draft');
+
+		return $post_id;
+
+
+	}
+
+	private function slugify($text){
+		// replace non letter or digits by -
+		$text = preg_replace('~[^\pL\d]+~u', '-', $text);
+
+		// transliterate
+		$text = iconv('utf-8', 'us-ascii//TRANSLIT', $text);
+
+		// remove unwanted characters
+		$text = preg_replace('~[^-\w]+~', '', $text);
+
+		// trim
+		$text = trim($text, '-');
+
+		// remove duplicate -
+		$text = preg_replace('~-+~', '-', $text);
+
+		// lowercase
+		$text = strtolower($text);
+
+		if (empty($text)) {
+			return 'n-a';
+		}
+
+		return $text;
+	}
+
+	public function addStoryPost($detail_json){
+
+		list($title, $acf_fields, $meta_fields, $content) = $this->addStory($detail_json, 0);
+		// add post
+		$post_id = $this->addPost($title, $acf_fields, $meta_fields, $content, 'story', 'draft');
+
+		return $post_id;
+
+	}
+
+	private function addStory($detail_json, $ident = 0){
+
+		// pr($detail_json); die();
+
+		$acf_fields = $meta_fields = array();
+		$info = $detail_json->_source;
+
+		// title
+		if(isset($info->title)){
+			$name = $info->title[0];
+			$title = $name->value;
+		} else {
+			$title = $info->summary_title;
+		}    
+		$acf_fields['field_595609d6cde50'] = $title;
+		// content
+		$content = '';
+
+		// admin id
+		//$acf_fields['field_595394ed2dda7'] = $info->admin->id;
+		// admin uid
+		//$acf_fields['field_5954cc1fc25f6'] = $info->admin->uid;
+		// admin.modified
+		//$acf_fields['field_5953955c2dda8'] = $info->admin->modified;
+		// admin.created
+		//$acf_fields['field_5953959b2dda9'] = $info->admin->created;
+
+		$meta_fields['story_' . $ident . '_admin_id'] = $info->admin->id;
+		$meta_fields['story_' . $ident . '_uid'] = $info->admin->uid;
+		$meta_fields['story_' . $ident . '_uuid'] = $info->admin->uuid;
+		$meta_fields['story_' . $ident . '_modified'] = $info->admin->modified;
+		$meta_fields['story_' . $ident . '_created'] = $info->admin->created;
+
+		// Main description
+		$acf_fields['field_59539687f0ec4'] = $this->getValueIfExists($info, 'description', 0, 'value');
+		// Text transcription
+		$acf_fields['field_595399883e326'] = $this->getValueIfExists($info, 'description', 1, 'value');
+		// Timecoded transcription
+		$acf_fields['field_595399b63e327'] = $this->getValueIfExists($info, 'description', 2, 'value');
+		//parent
+		$acf_fields['field_5966279f2d76a'] = $this->getValueIfExists($info, 'parent', 0, 'admin', 'id');
+
+		// events
+		$events = '';
+		if(isset($info->events) && count($info->events)){
+			$events_data = $info->events;
+			$events = array();
+			foreach($events_data as $e){
+				// agents
+				$agents = array();
+				if(isset($e->agents) && count($e->agents)){
+					foreach($e->agents as $a){
+						// ranks
+						$ranks = array();
+						if(isset($a->rank) && count($a->rank)){
+							foreach($a->rank as $rank){
+								if($rank->rank){
+									$ranks[] = array('rank' => $rank->rank);
+								}
+							}
+						}
+						// units
+						$units = array(); 
+						if(isset($a->units) && count($a->units)){ 
+							foreach($a->units as $unit){
+								$units[] = array(
+									'unit_name' => $this->getValueIfExists($unit, 'unit'),
+									'unit_type' => $this->getValueIfExists($unit, 'type')
+								); 
+							}
+						}
+
+						$agent = array(
+							'role' => $this->getValueIfExists($a, '@link', 'role', 0, 'value'),
+							'name' => $this->getValueIfExists($a, 'name', 0, 'value'),
+							'units' => $units,
+							'ranks' => $ranks
+						);
+						$agents[] = $agent;
+					}
+				}
+
+				//locations
+				$locations = array();
+				if(isset($e->locations) && count($e->locations)){
+					foreach($e->locations as $loc){
+						$location = array(
+							'place_name' => $this->getValueIfExists($loc, 'place', 'name', 'name'),
+							'place_type' => $this->getValueIfExists($loc, 'place', 'type', 'type'),
+							'hierarchy' => $this->getValueIfExists($loc, 'hierarchy'),
+							'address' => $this->getValueIfExists($loc, 'address')
+						);
+						$locations[] = $location;
+					}
+				}
+
+				//machinery
+				$machineries = array();
+				if(isset($e->machinery) && count($e->machinery)){
+					foreach($e->machinery as $mach){
+						$machinery = array(
+							'name' => $this->getValueIfExists($mach, 'name', 0, 'value'),
+							'type' => $this->getValueIfExists($mach, 'type', value),
+						);
+						$machineries[] = $machinery;
+					}
+				}
+
+
+				//objects
+				$objects = array();
+				if(isset($e->objects) && count($e->objects)){
+					foreach($e->objects as $obj){
+						$object = array(
+							'name' => $this->getValueIfExists($obj, 'name', 0, 'value'),
+						);
+						$objects[] = $object;
+					}
+				}
+
+				//periods
+				$periods = array();
+				if(isset($e->periods) && count($e->periods)){
+					foreach($e->periods as $per){
+						$periods[] = $this->getValueIfExists($per, 'name', 0, 'value');
+					}
+				}
+
+				//keywords
+				$keywords = array();
+				if(isset($e->keywords) && count($e->keywords)){
+					foreach($e->keywords as $kw){
+						$keywords[] = $this->getValueIfExists($kw, 'admin', 'id');
+					}
+				}
+
+				
+				//pr($machineries); die();
+
+				$events[] = array(
+					'event_type'   => $this->getValueIfExists($e, 'type'), // ??
+					'coverage_earliest' => $this->getValueIfExists($e, 'coverage', 0, 'earliest'),
+					'coverage_latest'  => $this->getValueIfExists($e, 'coverage', 0, 'latest'),
+					'date'  => $this->getValueIfExists($e, 'date', 'value'),
+					//'date_to'  => $this->getValueIfExists($e, 'date', 0, 'value'),
+					'event_name' => $this->getValueIfExists($e, 'event', 0, 'name', 'value'),
+					'event_agents' => $agents,
+					'locations' => $locations,
+					'machinery' => $machineries,
+					'objects' => $objects,
+					'periods' => $periods,
+					'keywords' => $keywords 
+				);
+			}
+
+		}
+
+		$acf_fields['field_595399f03e328'] = $events;
+
+		//pr($acf_fields); die();
+
+		return array($title, $acf_fields, $meta_fields, $content);
+	}
+
+	private function addPost($title = '', $acf_fields, $meta_fields, $content = '', $type = 'post', $status = 'publish'){
+		// Insert the post into the database
+		
+		$post_id = wp_insert_post(array (
+			'post_type' => $type,
+			'post_title' => $title,
+			'post_content' => $content,
+			'post_status' => $status,
+			'post_author' => 1,
+		));
+
+		if ($post_id && count($acf_fields)) {
+			foreach ($acf_fields as $key => $value) {
+				update_field($key, $value, $post_id);
+			}
+		}
+
+		if ($post_id && count($meta_fields)) {
+			foreach ($meta_fields as $key => $value) {
+				add_post_meta($post_id, $key, $value);
+			}
+		}
+
+		return $post_id;
+	}
+
+
+
+	private function getValueIfExists($root, $module, $value = false, $sub_value = false, $sub_sub_value = false){
+		$val = '';
+
+		// pr($root); die(); 
+
+		if(isset($root->$module)){
+			if($value !== false){
+				$mod = $root->$module;
+				$isset = false;
+				if(is_array($mod)){
+					if(isset($mod[$value])){
+						$val = $mod[$value];
+						$isset = true;
+					}
+				} else {
+					if(isset($root->$module->$value)){
+						$val = $mod->$value;
+						$isset = true;
+					}
+				}
+
+				if($sub_value !== false && $isset){
+					if(is_array($val)){
+						$val = $val[$sub_value];
+					} else {
+						if(isset($val->$sub_value)){
+							$val = $val->$sub_value; 
+						}
+						
+					}
+
+					if($sub_sub_value !== false){
+						if(is_array($val)){
+							$val = current($val);
+						}
+
+						$val = $val->$sub_sub_value;
+					}
+				}
+
+			} else {
+				$val = $root->$module;
+			}
+		}
+		return $val;
+	}
+	private function getStoryMeta($post_id, $ident, $key){
+		return get_post_meta($post_id, 'story_' . $ident . '_' . $key, true); 
+	}
+
+	private function get_admin_id($id, $title, $type){
+		if($id){
+			return $id;
+		}
+
+		return $type . '-' .  $this->slugify($title) . '-' .  time();
+	}
+
+	private function get_admin_uid($uid, $id){
+		if($uid){
+			return $uid;
+		}
+
+		return 'raf-wp-' . $id;
+	}
+	
+
+	private function getName($name, $add_primary = false){
+		$wrap = array();
+		$n = new StdClass();
+		$n->value = $name;
+		if($add_primary){
+			$n->primary = true;
+		}
+		$wrap[] = $n;
+		return $wrap;
+	}
+
+	private function getKeywordJson($id){
+		$p_link = '@link';
+		$keyword = new StdClass();
+		$keyword->$p_link = new StdClass();
+		//$keyword->$p_link->cascade = true;
+		$keyword->$p_link->type = 'reference';
+
+		$keyword->admin = new StdClass();
+		$keyword->admin->id = $id; 
+		$t = new StdClass();
+		$t->base = 'term';
+		$keyword->type = $t; 
+		return $keyword;
+	}
+
+	public function exportStory($post, $story_loop = false, $interview_id = false){
+		$p_link = '@link';
+
+		if($story_loop === false){
+			$fname = 'get_field';
+			$ident = 0;
+		} else {
+			$ident = $story_loop;
+			$fname = 'get_sub_field';
+		}
+
+
+		$additional_keywords = call_user_func($fname, 'additional_keywords', $post->ID);
+
+		//title
+		$t = call_user_func($fname, 'story_title', $post->ID);
+		$t = $t ? $t : $post->post_title;
+
+		//pr(have_rows('events', $post->ID)); pr(get_sub_field('story_title', $post->ID)); die();
+
+		$admin_id = $this->get_admin_id($this->getStoryMeta($post->ID, $ident, 'admin_id'), $t, 'story');
+		$admin_uid = $this->get_admin_uid($this->getStoryMeta($post->ID, $ident, 'uid'), $admin_id);
+		$admin_uuid = $this->getStoryMeta($post->ID, $ident, 'uuid');
+		$admin_modified = $this->getStoryMeta($post->ID, $ident, 'modified');
+		$admin_created = $this->getStoryMeta($post->ID, $ident, 'created');
+
+		$data = new StdClass();
+
+		// source
+		$admin = new StdClass();
+		$admin->id = $admin_id;
+		//$admin->uid = $admin_uid;
+		//$admin->uuid = $admin_uuid;
+		$admin->created = time(); // $admin_created;
+		$admin->modified = time();
+		//$admin->processed = time();
+		//$admin->source = 'rafs';
+		//$admin->stream = 'rafm-online';
+		$data->admin = $admin;
+
+		//title 
+		$data->title = $this->getName($t);
+
+		//description
+		$desctiptions = array();
+		$main_description = new StdClass();
+		$main_description->primary = true;
+		$main_description->type = 'main description';
+		$main_description->value = call_user_func($fname, 'main_description', $post->ID);
+		$desctiptions[] = $main_description;
+
+		$text_transcription = new StdClass();
+		$text_transcription->type = 'text transcription';
+		$text_transcription->value = call_user_func($fname, 'text_transcription', $post->ID);
+		$desctiptions[] = $text_transcription;
+
+		$timecoded_transcription = new StdClass();
+		$timecoded_transcription->primary = true;
+		$timecoded_transcription->type = 'timecoded transcription';
+		$timecoded_transcription->value = call_user_func($fname, 'timecoded_transcription', $post->ID);
+		$desctiptions[] = $timecoded_transcription;
+
+		$data->description = $desctiptions;
+
+
+		// events
+		$events = array();
+		$keywords_json = array();
+
+		if( have_rows('events', $post->ID) ){
+			while ( have_rows('events', $post->ID) ) { the_row();
+				$event = new StdClass();
+				//action
+				$event_header = new StdClass();
+				$link = new StdClass();
+				$link->message = 'This would hopefully link to Vernon';
+				$link->type = 'literal';
+
+
+				$event_header->name = $this->getName(get_sub_field('event_name'));
+				$event_header->type = get_sub_field('event_type');
+				$event_header->$p_link = $link;
+
+				$event_header->summary_title = get_sub_field('event_name');
+
+				$event->event = array($event_header);
+
+
+				//agents
+				$agents = array();
+				if( have_rows('event_agents', $post->ID) ){
+					while ( have_rows('event_agents') ) { the_row();
+						$agent = new StdClass();
+						$agent->$p_link = new StdClass();
+						$agent->$p_link->role = new StdClass();
+						$agent->$p_link->role->value = get_sub_field('role');
+						$agent->$p_link->type = 'literal';
+						$agent->name = $this->getName(get_sub_field('name'), true);
+						$agent->rank = array();
+						if( have_rows('ranks', $post->ID) ){
+							while ( have_rows('ranks') ) { the_row();
+								$rank = new StdClass();
+								$rank->rank = get_sub_field('rank');
+								$agent->rank[] = $rank;
+							}
+						}
+						$agent->units = array();
+						if( have_rows('units', $post->ID) ){
+							while ( have_rows('units') ) { the_row();
+								$unit = new StdClass();
+								$unit->unit = get_sub_field('unit_name');
+								$unit->type = get_sub_field('unit_type');
+								$agent->units[] = $unit;
+							}
+						}
+						$agents[] = $agent;
+					}
+				}
+				$event->agents = $agents;
+
+				//machinery
+				$machinery = array();
+				if( have_rows('machinery', $post->ID) ){
+					while ( have_rows('machinery') ) { the_row();
+						$mach = new StdClass();
+						$mach->name = $this->getName(get_sub_field('name'), true);
+						$mach->type = new StdClass();
+						$mach->type->value = get_sub_field('type');
+						$machinery[] = $mach;
+					}
+				}
+				$event->machinery = $machinery;
+
+				//coverage
+				$coverage = array();
+				$coverage_1 = new StdClass();
+				$coverage_1->earliest = get_sub_field('coverage_earliest');
+				$coverage_1->latest = get_sub_field('coverage_latest');
+				$coverage_1->primary = true;
+				$coverage_1->range = ($coverage_1->earliest != $coverage_1->latest);
+				$coverage_1->value = $coverage_1->earliest . '-' . $coverage_1->latest;
+				$coverage[] = $coverage_1;
+				$event->coverage = $coverage;
+
+				//date
+				$t = strtotime(get_sub_field('date'));
+				$event->date = new StdClass();
+				$event->date->earliest = date('Y', $t);
+				$event->date->latest = date('Y', $t);
+				$event->date->primary = true;
+				$event->date->value  = date('d.m.Y', $t);
+
+				//keywords
+				$keywords = array();
+				$selected_keywords = get_sub_field('keywords');
+				//pr($selected_keywords); die();
+				
+				if($selected_keywords && count($selected_keywords)){
+					foreach($selected_keywords as $kww){
+						if($kww['value']){
+							$kw_id = $kww['value'];
+							$keyword = $this->getKeywordJson($kw_id);
+							$keywords[] = $keyword;
+						}
+					}
+				}
+
+				//additional_keywords
+				$additional_keywords = trim(strip_tags(get_sub_field('additional_keywords')));
+				if(strlen($additional_keywords)){
+					$additional_keywords = explode("\n", $additional_keywords);
+					if(count($additional_keywords) > 0){
+
+						foreach ($additional_keywords as $kw_txt) {
+							$kw_txt = trim($kw_txt);
+							if(strlen($kw_txt)){
+								$k = new StdClass();
+								$admin = new StdClass();
+								$admin->id = $this->get_admin_id(false, $kw_txt, 'term'); // $kw_txt;
+								$admin->created = time();
+								$admin->modified = time();
+								$k->admin = $admin;
+								$n = new StdClass(); 
+								$n->value = $kw_txt;
+								$k->name = array($n);
+								$k->summary_title = $kw_txt; // = 'rafs-' . $this->slugify($kw_txt);
+								$t = new StdClass();
+								$t->base = 'term';
+								$k->type = $t;
+
+
+								$keyword = $this->getKeywordJson($admin->id);
+								$keywords[] = $keyword; 
+								$keywords_json[] = $k;
+							}
+						}
+						//echo (json_encode($keywords_json)); die();
+					}
+				}
+				//pr($keywords); die();
+				$event->keywords = $keywords;
+
+				//locations
+				$locations = array();
+				if( have_rows('locations', $post->ID) ){
+					while ( have_rows('locations') ) { the_row();
+						$location = new StdClass();
+						$location->place = new StdClass();
+						$location->place->name = new StdClass();
+						$location->place->name->primary = true;
+						$location->place->name->name = get_sub_field('place_name');
+						$location->place->type = new StdClass();
+						$location->place->type->type = get_sub_field('place_type');
+						$location->address = get_sub_field('address');
+						$location->hierarchy = get_sub_field('hierarchy');
+						$locations[] = $location;
+					}
+				}
+				$event->locations = $locations;
+
+				//objects
+				$objects = array();
+				if( have_rows('objects', $post->ID) ){
+					while ( have_rows('objects') ) { the_row();
+						$object = new StdClass();
+						$object->name = $this->getName(get_sub_field('name'), true);
+						$object->summary_title = get_sub_field('name');
+						$objects[] = $object;
+					}
+				}
+				$event->objects = $objects;
+
+				//periods
+				$periods = array();
+				$selected_periods = get_sub_field('periods');
+				if($selected_periods && count($selected_periods)){
+					foreach($selected_periods as $period_key){
+						$period = new StdClass();
+						$period->name = $this->getName($period_key, true);
+						$period->summary_title = $period_key;
+						$periods[] = $period;
+					}
+				}
+				
+				$event->periods = $periods;
+
+
+				$events[] = $event;
+			}
+		}
+		$data->events = $events;
+
+		// meida link
+		$data->media_link = call_user_func($fname, 'media_link', $post->ID);
+
+		// base type
+		$t = new StdClass();
+		$t->base = 'story';
+		$data->type = $t;
+
+		// parent
+		$interviews = call_user_func($fname, 'parent', $post->ID);
+		if($interview_id){
+			$interviews = array($interview_id);
+		}
+		$parent = array();
+		if(count($interviews) && is_array($interviews)){ 
+			foreach($interviews as $int_id ){
+				$p = new StdClass();
+				$p->$p_link = new StdClass();
+				$p->$p_link->type = 'reference';
+				
+				$p->admin = new StdClass();
+				$p->admin->id = $int_id;
+				$parent[] = $p;
+			}
+		} else {
+			
+		}
+		$data->interviews = $parent;
+
+		//$data->_source = $_source;
+
+		return array($admin_id, $data, $keywords_json);
+		//echo (json_encode($data)); die();
+	}
+
+	public function exportInterview($post){
+		$p_link = '@link';
+ 
+
+		$admin_id = $this->get_admin_id(get_post_meta($post->ID, 'admin_id', true), $post->post_title, 'interview');
+		$admin_uid = $this->get_admin_uid(get_post_meta($post->ID, 'admin_uid', true), $admin_id);
+
+		$admin_uuid = get_post_meta($post->ID, 'admin_uuid', true);
+	
+		//$admin_modified = $this->getStoryMeta($post->ID, 0, 'modified');
+		//$admin_created = $this->getStoryMeta($post->ID, 0, 'created');
+
+		$data = new StdClass();
+
+		// admin
+		$admin = new StdClass();
+		$admin->id = $admin_id;
+		//$admin->uid = $admin_uid;
+		//$admin->uuid = $admin_uuid;
+		/*
+		$_source->created = $admin_created;*/
+		$admin->created = time();
+		$admin->modified = time();
+
+		//$admin->source = 'rafs';
+		//$admin->stream = 'rafm-online';
+		$data->admin = $admin;
+
+		//title
+		$data->title = $this->getName(get_the_title($post->ID), true);
+ 
+		//agents
+		$interview_agents = array();
+		if( have_rows('interview_agents', $post->ID) ){
+			while ( have_rows('interview_agents') ) { the_row();
+				$agent = new StdClass();
+				$agent->$p_link = new StdClass();
+				$agent->$p_link->role = new StdClass();
+				$agent->$p_link->role->value = get_sub_field('iagent_role');
+				$agent->$p_link->type = 'literal';
+				$agent->name = $this->getName(get_sub_field('iagent_name'), true);
+				$agent->summary_title = get_sub_field('iagent_name');
+				$interview_agents[] = $agent;
+			}
+		}
+		$data->agents = $interview_agents;
+
+		// base type
+		$t = new StdClass();
+		$t->base = 'interview';
+		$data->type = $t;
+
+		// preflight
+		$pre_flight_data = array();
+		$pre_flight = new StdClass();
+		//$pre_flight->process = 'RAF Stories';
+
+		// stories
+		$stories = array();
+		$new_keywords = array();
+		if( have_rows('stories', $post->ID) ){
+			$story_loop = 0;
+			while ( have_rows('stories') ) { the_row();
+				list($story_admin_id, $story, $add_keywords) = $this->exportStory($post, $story_loop, $admin_id);
+				$new_keywords = array_merge($new_keywords, $add_keywords);
+				$pre_flight_data[] = $story_admin_id;
+				$stories[] = $story;
+				$story_loop++;
+			}
+		}
+		$stories_data = $stories;
+		//$data->stories = $stories;
+
+		$pre_flight_data[] = $admin_id;
+		foreach($new_keywords as $kw){ 
+			$pre_flight_data[] = $kw->admin->id;
+		}
+		$pre_flight->data = $pre_flight_data;
+		$ret_data = array();
+		$return = new StdClass();
+
+		//pr($pre_flight); die();
+
+
+		header('Content-Type: application/json');
+		if($new_keywords){
+			if(count($new_keywords)){
+				//		echo (json_encode($new_keywords));
+				foreach($new_keywords as $kw){
+					$ret_data[] = $kw;
+				}
+			}
+		}
+		$ret_data[] = $data;
+		if($stories_data){
+			if(count($stories_data)){
+				foreach($stories_data as $s){
+					$ret_data[] = $s;
+				}
+			}
+		}
+		//$ret_data[] = $stories_data;
+		$return->data = $ret_data;
+
+		$return->process = 'RAF Stories';
+
+		//echo (json_encode($pre_flight)); die();
+
+		//echo (json_encode($return)); die();
+		//return json_encode(array($return, $pre_flight));
+		return json_encode($return);
+
+	}
+
+}
+
+
+function post_published_export(  $post_id ) {
+	$post = get_post($post_id);
+	
+
+	if($post->post_status == 'publish'){
+
+		if($post->post_type == 'story'){
+
+			$importExport = new RafImportExport();
+			$CIIM = new CIIM();
+
+			list($story_admin_id, $story, $new_keywords) = $importExport->exportStory($post);
+			// preflight
+			$pre_flight_data = array();
+			$pre_flight = new StdClass();
+			$pre_flight_data[] = $story_admin_id;
+			foreach($new_keywords as $kw){
+				$pre_flight_data[] = $kw->admin->id;
+			}
+			$pre_flight->data = $pre_flight_data;
+			$ret_data = array();
+			$return = new StdClass();
+			if($new_keywords){
+				if(count($new_keywords)){
+					foreach($new_keywords as $kw){
+						$ret_data[] = $kw;
+					}
+				}
+			}
+			$ret_data[] = $story;
+			$return->data = $ret_data;
+			$return->process = 'RAF Stories';
+
+			$json = json_encode($return);
+			//pr($return); die();
+
+
+			$status = $CIIM->export($json);// die();
+			if($status){
+				// remove post
+				wp_delete_post($post_id, true);
+				wp_redirect(  get_admin_url() . 'edit.php?post_type=story&success_ciim=1' ); exit;
+			} else {
+				wp_redirect(  get_admin_url() . 'post.php?post=' . $post_id . '&action=edit' ); exit;
+			}
+		}
+
+		if($post->post_type == 'interview'){
+
+			$importExport = new RafImportExport();
+			$CIIM = new CIIM();
+			
+			//list($json, $pre_flight) = $importExport->exportInterview($post);
+			$json = $importExport->exportInterview($post);
+			
+			//echo $json; die(); 
+			$status = $CIIM->export($json);// die(); 
+
+			if($status){ 
+				// remove post
+				wp_delete_post($post_id, true);
+				wp_redirect(  get_admin_url() . 'edit.php?post_type=interview&success_ciim=1' ); exit;
+
+			} else {
+				wp_redirect(  get_admin_url() . 'post.php?post=' . $post_id . '&action=edit' ); exit;
+			}
+		}
+	}
+}
+add_action( 'acf/save_post','post_published_export', 200);

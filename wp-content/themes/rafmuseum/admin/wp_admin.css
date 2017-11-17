@@ -1,0 +1,26 @@
+.admin-marker{
+	position: absolute;
+	width: 20px;
+	margin: -10px 0px 0px -10px;
+	height: 20px;
+	line-height: 10px;  
+	background: url('admin_cross.png') no-repeat; 
+}
+
+#elastic_results{
+	width: 100%;
+}
+
+#elastic_results th, 
+#elastic_results td{
+	padding: 5px 10px 5px 0px;
+	text-align: left;
+}
+
+#elastic_results th{
+	font-weight: bold;
+}
+
+#elastic_results td{
+	font-weight: normal;
+}

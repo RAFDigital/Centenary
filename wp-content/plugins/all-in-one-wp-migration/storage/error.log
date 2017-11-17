@@ -1,0 +1,9 @@
+Nov 15 2017 12:45:27
+{"Number":2,"Message":"unlink(D:\\web\\raf-cms\\wp-content\\plugins\\all-in-one-wp-migration\\storage\\pobitwrbu5xb\\127.0.0.1-edsa-rafcms-20171115-124434-618.wpress): Permission denied","File":"D:\\web\\raf-cms\\wp-content\\plugins\\all-in-one-wp-migration\\lib\\vendor\\servmask\\filesystem\\class-ai1wm-directory.php","Line":49}
+
+Nov 15 2017 12:45:27
+{"Number":2,"Message":"unlink(D:\\web\\raf-cms\\wp-content\\plugins\\all-in-one-wp-migration\\storage\\pobitwrbu5xb\\filemap.list): Permission denied","File":"D:\\web\\raf-cms\\wp-content\\plugins\\all-in-one-wp-migration\\lib\\vendor\\servmask\\filesystem\\class-ai1wm-directory.php","Line":49}
+
+Nov 15 2017 12:45:27
+{"Number":2,"Message":"rmdir(D:\\web\\raf-cms\\wp-content\\plugins\\all-in-one-wp-migration\\storage\\pobitwrbu5xb): Directory not empty","File":"D:\\web\\raf-cms\\wp-content\\plugins\\all-in-one-wp-migration\\lib\\vendor\\servmask\\filesystem\\class-ai1wm-directory.php","Line":54}
+
